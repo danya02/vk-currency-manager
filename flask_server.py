@@ -11,7 +11,7 @@ with open('/var/vk-bots/currency/token.txt') as o:
 
 @app.route('/endpoint', methods=['POST'])
 def main():
-    data = request.get_json()
+    data = request.get_json(force=True)
     if data['type'] == 'confirmation':
         return 'caf10767'
     if data['type'] != 'message_new':
