@@ -5,7 +5,7 @@ from flask import Flask, request
 
 app = Flask(__name__)
 
-with open('token.txt') as o:
+with open('/var/vk-bots/currency/token.txt') as o:
     token = o.read().strip()
 
 
