@@ -9,7 +9,7 @@ with open('token.txt') as o:
     token = o.read().strip()
 
 
-@app.route('/', methods=['POST'])
+@app.route('/endpoint', methods=['POST'])
 def main():
     data = request.get_json()
     if data['type'] == 'confirmation':
