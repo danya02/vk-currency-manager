@@ -16,7 +16,9 @@ class BaseModel(Model):
 
 
 peewee.BaseModel = BaseModel
-#import peeweedbevolve
+
+
+# import peeweedbevolve
 
 
 class User(BaseModel):
@@ -34,7 +36,7 @@ class LocalBalance(BaseModel):
     chat = ForeignKeyField(Chat, backref='balances')
 
 
-#peeweedbevolve.evolve(db, interactive=False)
+# peeweedbevolve.evolve(db, interactive=False)
 
 db.create_tables([User, Chat, LocalBalance])
 
@@ -73,9 +75,9 @@ def main():
 
 
 def process_msg(text, user, to):
-    text = text.lower()
-    if 'bot' in text:
-        text = text.split()
+    text = text.lower().split()
+    if len(text)==0:return None
+    if text[0] == 'money':
         try:
             user_obj = User.get(User.user_id == user)
         except DoesNotExist:
@@ -85,11 +87,18 @@ def process_msg(text, user, to):
                 return 'Your global balance is: ₲' + str(
                     user_obj.balance) + '. To see your local balance, repeat the query inside a chat with the ' \
                                         'community active in the chat. '
-            elif text[1]=='get':
+            elif text[1] == 'get':
+                try:
+                    if '-' in text[2] or str(int(text[2])) != text[2]:
+                        raise ValueError
+                except IndexError:
+                    return 'Syntax: money get {int}'
+                except ValueError:
+                    return 'Value must be a positive integer in its most compact representation.'
                 with db.atomic():
-                    user_obj.balance+=10
+                    user_obj.balance += 10
                     user_obj.save()
-                    return '₲10 GET!'
+                    return '£' + str(int(text[2])) + ' GET!'
         else:  # public chat
             try:
                 chat = Chat.get(Chat.chat_id == to)
@@ -104,10 +113,17 @@ def process_msg(text, user, to):
             if text[1] == 'balance':
                 return 'Your local balance for this chat (id ' + str(chat.chat_id) + ') is: £' + str(
                     local_balance.balance) + '. To see your global balance, start a private chat with this community.'
-            elif text[1]=='get':
+            elif text[1] == 'get':
+                try:
+                    if '-' in text[2] or str(int(text[2])) != text[2]:
+                        raise ValueError
+                except IndexError:
+                    return 'Syntax: money get {int}'
+                except ValueError:
+                    return 'Value must be a positive integer in its most compact representation.'
                 with db.atomic():
-                    local_balance.balance+=10
+                    local_balance.balance += int(text[2])
                     local_balance.save()
-                    return '£10 GET!'
+                    return '£' + str(int(text[2])) + ' GET!'
 
-        return 'Request fell through conditions -- that\'s an error.'
+        return 'Command "' + text[1] + '" is not valid, valid commands are: balance, get.'
