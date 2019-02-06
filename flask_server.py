@@ -186,13 +186,13 @@ class UserMention(String):
         return 'mention'
 
     def long_name(self):
-        return 'User at-mention (example: @durov)'
+        return 'User @-mention (example: @durov)'
 
     def is_val_ok(self, value):
-        value=value.split('@')[1].replace('[','').replace(']','').replace('|','')
-        session = vk_api.VkApi(token=token)
-        api = session.get_api()
         try:
+            value=value.split('@')[1].replace('[','').replace(']','').replace('|','')
+            session = vk_api.VkApi(token=token)
+            api = session.get_api()
             api.users.get(user_ids=value)
             return True
         except:
