@@ -7,7 +7,6 @@ from peewee import *
 
 import abc
 
-
 db = MySQLDatabase('vkfinance', user='vkfinance', password='12349876')
 db.connect()
 
@@ -98,7 +97,6 @@ class Type(metaclass=abc.ABCMeta):
 
 
 class Integer(Type):
-
     def parse(self, value):
         return int(value)
 
@@ -114,6 +112,86 @@ class Integer(Type):
 
     def long_name(self):
         return 'Integer'
+
+
+class PositiveInteger(Integer):
+    def short_name(self):
+        return 'int(>0)'
+
+    def long_name(self):
+        return 'Integer greater than 0'
+
+    def is_val_ok(self, value):
+        if super().is_val_ok(value):
+            return super().parse(value) > 0
+        else:
+            return False
+
+
+class IntegerInRange(Integer):
+    def __init__(self, a, b, description=None, optional=False):
+        super().__init__(description, optional)
+        self.range = range(a, b)
+
+    def is_val_ok(self, value):
+        if super().is_val_ok(value):
+            return super().parse(value) in self.range
+
+    def short_name(self):
+        return 'int(>=' + str(self.range.start) + '&&<' + str(self.range.stop) + ')'
+
+    def long_name(self):
+        return 'Integer in range [' + str(self.range.start) + '; ' + str(self.range.stop) + ')'
+
+
+class ChatID(PositiveInteger):
+    def short_name(self):
+        return 'chat_id'
+
+    def long_name(self):
+        return 'Chat ID (get your own with the "id" command)'
+
+    def is_val_ok(self, value):
+        if super().is_val_ok(value):
+            return Chat.get_or_none(Chat.chat_id == super().parse(value)) is not None
+
+
+class String(Type):
+    def parse(self, value):
+        return value
+
+    def short_name(self):
+        return 'str'
+
+    def long_name(self):
+        return 'String'
+
+    def is_val_ok(self, value):
+        return True
+
+
+class UserMention(String):
+    def short_name(self):
+        return 'mention'
+
+    def long_name(self):
+        return 'User at-mention (example: @durov)'
+
+    def is_val_ok(self, value):
+        if value[0] != '@':
+            return False
+        session = vk_api.VkApi(token=token)
+        api = session.get_api()
+        try:
+            api.users.get(user_ids=value[1:])
+            return True
+        except vk_api.exceptions.ApiError:
+            return False
+
+    def parse(self, value):
+        session = vk_api.VkApi(token=token)
+        api = session.get_api()
+        return api.users.get(user_ids=value[1:])[0]['id']
 
 
 def params(*parameters):
@@ -175,16 +253,6 @@ def description(desc):
 def balance(user_id, respond_to):
     'Get your balance.'
     return 'Working on it...'
-
-
-@params(Integer(), Integer(optional=True), Integer(optional=True))
-def acc_create(user_id, respond_to, value, value2=None, value3=None):
-    return 'Working on it...'+str(value)+' '+str(value2)+' '+str(value3)
-
-
-@params(Integer('value', True))
-def acc_destroy(user_id, respond_to, val=None):
-    return 'Working on it...' + str(val)
 
 
 @params()
