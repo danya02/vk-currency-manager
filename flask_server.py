@@ -26,12 +26,12 @@ LOCAL_SYMB = '£'
 
 
 class User(BaseModel):
-    user_id = BigIntegerField()
+    user_id = BigIntegerField(unique=True)
     balance = BigIntegerField(default=0)
 
 
 class Chat(BaseModel):
-    chat_id = BigIntegerField()
+    chat_id = BigIntegerField(unique=True)
 
 
 class LocalBalance(BaseModel):
@@ -48,6 +48,19 @@ app = Flask(__name__)
 
 with open('/var/vk-bots/currency/token.txt') as o:
     token = o.read().strip()
+
+
+def send(to, msg):
+    session = vk_api.VkApi(token=token)
+    api = session.get_api()
+    api.messages.send(peer_id=to, message=msg, random_id=0)
+
+
+def repr_user(user_id):
+    session = vk_api.VkApi(token=token)
+    api = session.get_api()
+    data = api.users.get(user_ids=user_id, fields='screen_name')[0]
+    return data['first_name'] + ' ' + data['last_name'] + ' (@' + data['screen_name'] + ')'
 
 
 @app.route('/endpoint', methods=['GET', 'POST'])
@@ -72,9 +85,7 @@ def main():
     except:
         msg = 'Sorry, an exception occurred while processing your request.\n' + traceback.format_exc()
     if msg is not None:
-        session = vk_api.VkApi(token=token)
-        api = session.get_api()
-        api.messages.send(peer_id=to, message=msg, random_id=0)
+        send(to, msg)
     return 'ok'
 
 
@@ -178,20 +189,21 @@ class UserMention(String):
         return 'User at-mention (example: @durov)'
 
     def is_val_ok(self, value):
-        if value[0] != '@':
-            return False
+        value=value.split('@')[1].replace('[','').replace(']','').replace('|','')
         session = vk_api.VkApi(token=token)
         api = session.get_api()
         try:
-            api.users.get(user_ids=value[1:])
+            api.users.get(user_ids=value)
             return True
-        except vk_api.exceptions.ApiError:
+        except:
             return False
 
+
     def parse(self, value):
+        value=value.split('@')[1].replace('[','').replace(']','').replace('|','')
         session = vk_api.VkApi(token=token)
         api = session.get_api()
-        return api.users.get(user_ids=value[1:])[0]['id']
+        return api.users.get(user_ids=value)[0]['id']
 
 
 def params(*parameters):
@@ -217,7 +229,7 @@ def params(*parameters):
             parsed_args = []
             for n, i, j in zip(range(len(args)), args, parameters):
                 if not j.is_val_ok(i):
-                    return 'Argument ' + str(n + 1) + ' is not a valid ' + j.long_name() + '.'
+                    return 'Argument ' + str(n + 1) + ' ('+repr(i)+') is not a valid ' + j.long_name() + '.'
                 parsed_args.append(j.parse(i))
             return func(user_id, respond_to, *parsed_args)
 
@@ -249,29 +261,110 @@ def description(desc):
     return decorator
 
 
-@params()
-def balance(user_id, respond_to):
-    'Get your balance.'
-    return 'Working on it...'
+@params(ChatID(optional=True))
+def balance(user_id, respond_to, chat_id=None):
+    """Get your balance. If the optional chat ID is set, get your balance for that chat instead of this one."""
+    user, created = User.get_or_create(user_id=user_id)
+    if chat_id is None:
+        if user_id == respond_to:
+            return 'Your global balance is: ' + GLOBAL_SYMB + str(user.balance)
+        else:
+            chat, chat_created = Chat.get_or_create(chat_id=respond_to)
+            local_balance, localb_created = LocalBalance.get_or_create(user=user, chat=chat)
+            return 'Your local balance is: ' + LOCAL_SYMB + str(local_balance.balance) + '.'
+    else:
+        if respond_to != user_id and chat_id != respond_to:
+            return 'It is unsafe to check balance for a chat different to your own. Please start a chat with this ' \
+                   'community and repeat your query.'
+        else:
+            chat, chat_created = Chat.get_or_create(chat_id=chat_id)
+            local_balance, localb_created = LocalBalance.get_or_create(user=user, chat=chat)
+            return 'Your local balance for chat ' + str(chat_id) + ' is: ' + LOCAL_SYMB + str(
+                local_balance.balance) + '.'
 
 
 @params()
 def chat_id(user_id, respond_to):
+    """Check this chat's ID. This ID can later be used to get your balance without being in the chat, and to convert
+    global balance to that chat's local balance. """
     if user_id == respond_to:
         return 'This is the private chat between you and this community; it has no ID. You must use this chat to ' \
                'manage your global balance. '
     else:
         return 'This chat has an ID of ' + str(
             respond_to) + '. This is the ID to use to convert global balance to local ' \
-                          'balance. '
+                          'balance and to check your balance privately.'
+
+
+@params(UserMention('destination user'), PositiveInteger('amount to transfer'), String('confirmation', True))
+def transfer(user_id, respond_to, dest_user, amt_transfer, confirm=None):
+    """Give some currency of this chat to another user."""
+    user, created = User.get_or_create(user_id=user_id)
+    if respond_to == user_id:
+        if confirm != 'Confirm':
+            return 'You are requesting to transfer ' + GLOBAL_SYMB + str(amt_transfer) + ' from you to ' + \
+                   repr_user(dest_user) + \
+                   '. If this is what you wanted to do, write "Confirm" without quotes after the amount to ' \
+                   'transfer and repeat your query.'
+        if user.balance >= amt_transfer:
+            other_user, other_user_created = User.get_or_create(user_id=dest_user)
+            with db.atomic():
+                user.balance -= amt_transfer
+                other_user.balance += amt_transfer
+                user.save()
+                other_user.save()
+            if other_user_created:
+                msg = 'User ' + repr_user(user_id) + ' has just transferred ' + GLOBAL_SYMB + str(
+                    amt_transfer) + ' to you via the Currency manager bot.'
+            else:
+                msg = 'Received ' + GLOBAL_SYMB + str(amt_transfer) + ' from ' + repr_user(user_id) + '.'
+            note = ''
+            try:
+                send(dest_user, msg)
+            except:
+                note = 'However, because that user did not start a chat with this community, the notification failed. ' \
+                       'You will have to inform them manually. '
+            return 'Transferred ' + GLOBAL_SYMB + str(amt_transfer) + ' to ' + repr_user(dest_user) + '. '+note
+        else:
+            return 'Insufficient funds to transfer.'
+    else:
+        if confirm not in ['ForceConfirm', 'Confirm']:
+            return 'You are requesting to transfer ' + LOCAL_SYMB + str(amt_transfer) + ' from you to ' + repr_user(
+                dest_user) + \
+                   '. If this is what you wanted to do, write "Confirm" without quotes after the amount to ' \
+                   'transfer and repeat your query.'
+        other_user, other_user_created = User.get_or_create(user_id=dest_user)
+        chat, chat_created = Chat.get_or_create(chat_id=respond_to)
+        other_local_balance = LocalBalance.get_or_none(LocalBalance.chat == chat, LocalBalance.user == other_user)
+        if other_local_balance is None:
+            if confirm != 'ForceConfirm':
+                return 'Attention: The target user, ' + repr_user(dest_user) + ', has no database entry for this ' \
+                                                                               'chat.  This means that user has never ' \
+                                                                               'performed any interaction with this ' \
+                                                                               'bot in this chat. If you ' \
+                                                                               'wish to transfer anyway, repeat your ' \
+                                                                               'query, replacing "Confirm" with ' \
+                                                                               '"ForceConfirm".'
+            other_local_balance = LocalBalance.create(user=other_user, chat=chat)
+        my_local_balance, _ = LocalBalance.get_or_create(user=user, chat=chat)
+        if my_local_balance.balance >= amt_transfer:
+            with db.atomic():
+                my_local_balance.balance -= amt_transfer
+                other_local_balance.balance += amt_transfer
+                my_local_balance.save()
+                other_local_balance.save()
+            return 'Transferred ' + LOCAL_SYMB + str(amt_transfer) + ' to ' + repr_user(dest_user) + '.'
+        else:
+            return 'Insufficient funds to transfer.'
 
 
 def process_msg(text, user, to):
     try:
-        text = text.lower().split()
+        text = text.split()
+        text[0] = text[0].lower()
     except:
         return None
-    cmds = {'balance': balance, 'id': chat_id}
+    cmds = {'balance': balance, 'id': chat_id, 'send': transfer}
     if len(text) == 0: return None
     if text[0] == 'money' or user == to:
         if text[0] == 'money':
@@ -287,7 +380,7 @@ def process_msg(text, user, to):
                 cur_level = cmds
                 while not callable(cur_level):
                     try:
-                        this_lvl_cmd = text.pop(0)
+                        this_lvl_cmd = text.pop(0).lower()
                     except IndexError:
                         return 'Command expected. Available commands are: ' + ' '.join(path) + ' {' + ', '.join(
                             cur_level) + '}.'
