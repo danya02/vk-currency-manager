@@ -190,7 +190,7 @@ class UserMention(String):
 
     def is_val_ok(self, value):
         try:
-            value=value.split('@')[1].replace('[','').replace(']','').replace('|','')
+            value = value.split('@')[1].replace('[', '').replace(']', '').replace('|', '')
             session = vk_api.VkApi(token=token)
             api = session.get_api()
             api.users.get(user_ids=value)
@@ -198,9 +198,8 @@ class UserMention(String):
         except:
             return False
 
-
     def parse(self, value):
-        value=value.split('@')[1].replace('[','').replace(']','').replace('|','')
+        value = value.split('@')[1].replace('[', '').replace(']', '').replace('|', '')
         session = vk_api.VkApi(token=token)
         api = session.get_api()
         return api.users.get(user_ids=value)[0]['id']
@@ -229,7 +228,7 @@ def params(*parameters):
             parsed_args = []
             for n, i, j in zip(range(len(args)), args, parameters):
                 if not j.is_val_ok(i):
-                    return 'Argument ' + str(n + 1) + ' ('+repr(i)+') is not a valid ' + j.long_name() + '.'
+                    return 'Argument ' + str(n + 1) + ' (' + repr(i) + ') is not a valid ' + j.long_name() + '.'
                 parsed_args.append(j.parse(i))
             return func(user_id, respond_to, *parsed_args)
 
@@ -324,7 +323,7 @@ def transfer(user_id, respond_to, dest_user, amt_transfer, confirm=None):
             except:
                 note = 'However, because that user did not start a chat with this community, the notification failed. ' \
                        'You will have to inform them manually. '
-            return 'Transferred ' + GLOBAL_SYMB + str(amt_transfer) + ' to ' + repr_user(dest_user) + '. '+note
+            return 'Transferred ' + GLOBAL_SYMB + str(amt_transfer) + ' to ' + repr_user(dest_user) + '. ' + note
         else:
             return 'Insufficient funds to transfer.'
     else:
@@ -358,13 +357,35 @@ def transfer(user_id, respond_to, dest_user, amt_transfer, confirm=None):
             return 'Insufficient funds to transfer.'
 
 
+@params(PositiveInteger('amount to convert'), ChatID('target chat'), String('confirmation', True))
+def convert(user_id, respond_to, amt, chat_id, confirm=None):
+    """Convert some global currency to local currency of this chat. Note, this operation is irreversible."""
+    if user_id != respond_to:
+        return 'You must be in a private chat with this community to perform this action.'
+    user, _ = User.get_or_create(user_id=user_id)
+    if user.balance < amt:
+        return 'Insufficient funds in global currency to complete the conversion.'
+    if confirm != 'Confirm':
+        return 'You are requesting to convert ' + GLOBAL_SYMB + str(amt) + ' to ' + LOCAL_SYMB + str(amt) + \
+               ' in chat ' + str(chat_id) + '. If this is what you wanted to do, write "Confirm" without quotes after the ' \
+                                       'amount to convert and repeat your query. '
+    chat = Chat.get(Chat.chat_id == chat_id)
+    local_balance = LocalBalance.get(LocalBalance.user == user, LocalBalance.chat == chat)
+    with db.atomic():
+        user.balance -= amt
+        local_balance.balance += amt
+        user.save()
+        local_balance.save()
+    return 'Conversion completed.'
+
+
 def process_msg(text, user, to):
     try:
         text = text.split()
         text[0] = text[0].lower()
     except:
         return None
-    cmds = {'balance': balance, 'id': chat_id, 'send': transfer}
+    cmds = {'balance': balance, 'id': chat_id, 'send': transfer, 'convert': convert}
     if len(text) == 0: return None
     if text[0] == 'money' or user == to:
         if text[0] == 'money':
