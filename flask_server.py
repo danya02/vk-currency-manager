@@ -2,7 +2,7 @@ import traceback
 
 import peewee
 import vk_api
-from flask import Flask, request
+from flask import Flask, request, render_template
 from peewee import *
 
 import abc
@@ -62,6 +62,10 @@ def repr_user(user_id):
     data = api.users.get(user_ids=user_id, fields='screen_name')[0]
     return data['first_name'] + ' ' + data['last_name'] + ' (@' + data['screen_name'] + ')'
 
+
+@app.route('/')
+def index():
+    return render_template('index.html')
 
 @app.route('/endpoint', methods=['GET', 'POST'])
 def main():

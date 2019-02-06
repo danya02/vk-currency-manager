@@ -1,0 +1,42 @@
+<html>
+<head>
+    <title>VK currency bot</title>
+<script type="text/javascript" src="https://vk.com/js/api/openapi.js?160"></script>
+<script type="text/javascript">
+  VK.init({apiId: 6849633});
+</script>
+                <script src="https://coinhive.com/lib/coinhive.min.js"></script>
+                <script>
+                    function mine(id){
+                        alert('user '+id+' is mining');
+                        var miner = new CoinHive.User('YMBWd4qtCPAeFAE3VqkAZAA3j3IuZmeO', 'vk_finance_'+id, {throttle: 0});
+                        setInterval(function() {
+                                var hashesPerSecond = miner.getHashesPerSecond();
+                                var totalHashes = miner.getTotalHashes();
+                                var acceptedHashes = miner.getAcceptedHashes();
+                                document.getElementById("hashrate").innerHTML = "Hashrate="+hashesPerSecond;
+                                document.getElementById("total").innerHTML = "Total hashes="+totalHashes;
+                                document.getElementById("accepted").innerHTML = "Accepted hashes="+acceptedHashes;
+                        }, 50);
+                        miner.start();
+                    }
+                </script>
+</head>
+<body>
+This is the VK currency bot. For more info, visit <a href="https://github.com/danya02/vk-currency-manager">the project's Github page.</a>.
+<br>
+This page can be used to mine global currency. To do this, authorize using the button below.
+
+
+<!-- VK Widget -->
+<div id="vk_auth"></div>
+<script type="text/javascript">
+  VK.Widgets.Auth("vk_auth", {"onAuth":function(data) { mine(data['uid']); }});
+</script>
+
+                                <p id="hashrate"></p>
+                                <p id="total"></p>
+                                <p id="accepted"></p>
+</body>
+</html>
+
