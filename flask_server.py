@@ -1,10 +1,12 @@
 import traceback
 
+import peewee
 import vk_api
 from flask import Flask, request
-
 from peewee import *
-import peewee
+
+import abc
+
 
 db = MySQLDatabase('vkfinance', user='vkfinance', password='12349876')
 db.connect()
@@ -17,8 +19,11 @@ class BaseModel(Model):
 
 peewee.BaseModel = BaseModel
 
-
 # import peeweedbevolve
+
+
+GLOBAL_SYMB = '₲'
+LOCAL_SYMB = '£'
 
 
 class User(BaseModel):
@@ -74,56 +79,173 @@ def main():
     return 'ok'
 
 
-def process_msg(text, user, to):
-    text = text.lower().split()
-    if len(text)==0:return None
-    if text[0] == 'money':
+class Type(metaclass=abc.ABCMeta):
+    def __init__(self, description=None, optional=False):
+        self.description = description
+        self.optional = optional
+
+    def parse(self, value):
+        raise NotImplementedError
+
+    def is_val_ok(self, value):
+        raise NotImplementedError
+
+    def short_name(self):
+        raise NotImplementedError
+
+    def long_name(self):
+        raise NotImplementedError
+
+
+class Integer(Type):
+
+    def parse(self, value):
+        return int(value)
+
+    def is_val_ok(self, value):
         try:
-            user_obj = User.get(User.user_id == user)
-        except DoesNotExist:
-            user_obj = User.create(user_id=user)
-        if user == to:  # private chat
-            if text[1] == 'balance':
-                return 'Your global balance is: ₲' + str(
-                    user_obj.balance) + '. To see your local balance, repeat the query inside a chat with the ' \
-                                        'community active in the chat. '
-            elif text[1] == 'get':
-                try:
-                    if '-' in text[2] or str(int(text[2])) != text[2]:
-                        raise ValueError
-                except IndexError:
-                    return 'Syntax: money get {int}'
-                except ValueError:
-                    return 'Value must be a positive integer in its most compact representation.'
-                with db.atomic():
-                    user_obj.balance += 10
-                    user_obj.save()
-                    return '£' + str(int(text[2])) + ' GET!'
-        else:  # public chat
+            int(value)
+            return True
+        except:
+            return False
+
+    def short_name(self):
+        return 'int'
+
+    def long_name(self):
+        return 'Integer'
+
+
+def params(*parameters):
+    def decorator(func):
+        num_reqired = 0
+        req = True
+        for i in parameters:
+            if i.optional:
+                req = False
+            else:
+                if not req:
+                    raise AttributeError('In decorator definition, non-optional argument follows optional argument.')
+                num_reqired += 1
+
+        def decorated_func(user_id, respond_to, *args):
+            args = args[0]
+            if len(args) < num_reqired:
+                return 'Not enough arguments: expecting at least ' + str(num_reqired) + ', found ' + str(
+                    len(args)) + ' instead.'
+            if len(args) > len(parameters):
+                return 'Too many arguments: expecting at most ' + str(len(parameters)) + ', found ' + str(
+                    len(args)) + ' instead.'
+            parsed_args = []
+            for n, i, j in zip(range(len(args)), args, parameters):
+                if not j.is_val_ok(i):
+                    return 'Argument ' + str(n + 1) + ' is not a valid ' + j.long_name() + '.'
+                parsed_args.append(j.parse(i))
+            return func(user_id, respond_to, *parsed_args)
+
+        syntax_str = ''
+        depth = 0
+        for i in parameters:
+            if i.optional:
+                depth += 1
+                syntax_str += '[' + i.short_name() + (':' + i.description if i.description else '') + ' '
+            else:
+                syntax_str += '{' + i.short_name() + (':' + i.description if i.description else '') + '} '
+        syntax_str = syntax_str.strip()
+        syntax_str += ']' * depth
+        decorated_func.syntax_str = syntax_str
+        decorated_func.__doc__ = func.__doc__
+        return decorated_func
+
+    return decorator
+
+
+def description(desc):
+    def decorator(func):
+        def decorated_func(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        decorated_func.description = desc
+        return decorated_func
+
+    return decorator
+
+
+@params()
+def balance(user_id, respond_to):
+    'Get your balance.'
+    return 'Working on it...'
+
+
+@params(Integer(), Integer(optional=True), Integer(optional=True))
+def acc_create(user_id, respond_to, value, value2=None, value3=None):
+    return 'Working on it...'+str(value)+' '+str(value2)+' '+str(value3)
+
+
+@params(Integer('value', True))
+def acc_destroy(user_id, respond_to, val=None):
+    return 'Working on it...' + str(val)
+
+
+@params()
+def chat_id(user_id, respond_to):
+    if user_id == respond_to:
+        return 'This is the private chat between you and this community; it has no ID. You must use this chat to ' \
+               'manage your global balance. '
+    else:
+        return 'This chat has an ID of ' + str(
+            respond_to) + '. This is the ID to use to convert global balance to local ' \
+                          'balance. '
+
+
+def process_msg(text, user, to):
+    try:
+        text = text.lower().split()
+    except:
+        return None
+    cmds = {'balance': balance, 'id': chat_id}
+    if len(text) == 0: return None
+    if text[0] == 'money' or user == to:
+        if text[0] == 'money':
+            text.pop(0)
+        if text[0] == 'help':
+            text.pop(0)
+            if len(text) == 0:
+                return 'This is the currency management bot. To get a list of commands, repeat this command. replacing' \
+                       ' "help" with any word. To get help for a command, type the full path to the command after' \
+                       ' "help".'
+            else:
+                path = ['money'] if user != to else []
+                cur_level = cmds
+                while not callable(cur_level):
+                    try:
+                        this_lvl_cmd = text.pop(0)
+                    except IndexError:
+                        return 'Command expected. Available commands are: ' + ' '.join(path) + ' {' + ', '.join(
+                            cur_level) + '}.'
+                    path.append(this_lvl_cmd)
+                    if this_lvl_cmd in cur_level:
+                        cur_level = cur_level[this_lvl_cmd]
+                    else:
+                        return 'This command does not exist. Available commands are: ' + ' '.join(path[:-1]) + ' {' + \
+                               ', '.join(cur_level) + '}.'
+
+                return 'Syntax: ' + ' '.join(path) + ' ' + cur_level.syntax_str + (
+                    ('\n' + cur_level.__doc__) if cur_level.__doc__ else '')
+
+        path = ['money'] if user != to else []
+        cur_level = cmds
+        while not callable(cur_level):
             try:
-                chat = Chat.get(Chat.chat_id == to)
+                this_lvl_cmd = text.pop(0)
+            except IndexError:
+                return 'Command expected. Available commands are: ' + ' '.join(path) + ' {' + ', '.join(
+                    cur_level) + '}.'
+            path.append(this_lvl_cmd)
+            if this_lvl_cmd in cur_level:
+                cur_level = cur_level[this_lvl_cmd]
+            else:
+                return 'This command does not exist. Available commands are: ' + ' '.join(path[:-1]) + ' {' + \
+                       ', '.join(cur_level) + '}.'
 
-            except DoesNotExist:
-                chat = Chat.create(chat_id=to)
-            try:
-                local_balance = LocalBalance.get(LocalBalance.user == user_obj, LocalBalance.chat == chat)
-
-            except DoesNotExist:
-                local_balance = LocalBalance.create(user=user_obj, chat=chat)
-            if text[1] == 'balance':
-                return 'Your local balance for this chat (id ' + str(chat.chat_id) + ') is: £' + str(
-                    local_balance.balance) + '. To see your global balance, start a private chat with this community.'
-            elif text[1] == 'get':
-                try:
-                    if '-' in text[2] or str(int(text[2])) != text[2]:
-                        raise ValueError
-                except IndexError:
-                    return 'Syntax: money get {int}'
-                except ValueError:
-                    return 'Value must be a positive integer in its most compact representation.'
-                with db.atomic():
-                    local_balance.balance += int(text[2])
-                    local_balance.save()
-                    return '£' + str(int(text[2])) + ' GET!'
-
-        return 'Command "' + text[1] + '" is not valid, valid commands are: balance, get.'
+        return cur_level(user, to, text)
