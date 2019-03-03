@@ -4,6 +4,7 @@ import peewee
 import vk_api
 from flask import Flask, request, render_template
 from peewee import *
+import requests
 
 import abc
 
@@ -23,6 +24,7 @@ peewee.BaseModel = BaseModel
 
 GLOBAL_SYMB = '₲'
 LOCAL_SYMB = '£'
+MINING_DIFF = 16384
 
 
 class User(BaseModel):
@@ -48,6 +50,9 @@ app = Flask(__name__)
 
 with open('/var/vk-bots/currency/token.txt') as o:
     token = o.read().strip()
+
+with open('/var/vk-bots/currency/coinhive-token.txt') as o:
+    coinhive_token = o.read().strip()
 
 
 def send(to, msg):
@@ -382,6 +387,27 @@ def convert(user_id, respond_to, amt, chat_id, confirm=None):
         local_balance.save()
     return 'Conversion completed.'
 
+@params()
+def withdraw(user_id, respond_to):
+    '''Redeem global currency earned through mining.'''
+    answer = requests.get("https://api.coinhive.com/user/balance?secret="+coinhive_token+'&name='+str(user_id)).json()
+    if not answer['success']:
+        return 'Getting your crypto-balance failed. The server response was: '+str(answer)+'\nMost likely this means you haven\'t started mining yet. Visit this community\'s page to go to the mining page.'
+    balance_add = (answer['balance']//MINING_DIFF)
+    if balance_add==0:
+        return 'Not enough hashes to convert to global currency: you have '+str(answer['balance'])+' hashes. Mine more, the exchange rate is '+str(MINING_DIFF)+' hashes per '+GLOBAL_SYMB+'1.'
+    if requests.post("https://api.coinhive.com/user/withdraw", data={'secret':coinhive_token, 'name':str(user_id), 'amount':balance_add*MINING_DIFF}).json()['success']:
+        with db.atomic():
+            user = User.get(User.user_id==user_id)
+            user.balance+=balance_add
+            user.save()
+            return 'Your global balance has been increased by '+GLOBAL_SYMB+str(balance_add)+'.'
+    else:
+        return 'A problem occurred while getting your balance from the Coinhive server.'
+
+
+
+
 
 def process_msg(text, user, to):
     try:
@@ -389,7 +415,7 @@ def process_msg(text, user, to):
         text[0] = text[0].lower()
     except:
         return None
-    cmds = {'balance': balance, 'id': chat_id, 'send': transfer, 'convert': convert}
+    cmds = {'balance': balance, 'id': chat_id, 'send': transfer, 'convert': convert, 'withdraw':withdraw}
     if len(text) == 0: return None
     if text[0] == 'money' or user == to:
         if text[0] == 'money':

@@ -4,3 +4,4 @@ peewee
 peewee-db-evolve
 # if item below not installing, apt-get install default-libmysqlclient-dev
 mysqlclient
+requests

