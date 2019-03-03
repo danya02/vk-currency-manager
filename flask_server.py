@@ -1,3 +1,4 @@
+import base64
 import traceback
 
 import peewee
@@ -5,6 +6,7 @@ import vk_api
 from flask import Flask, request, render_template
 from peewee import *
 import requests
+import rsa
 
 import abc
 
@@ -42,9 +44,19 @@ class LocalBalance(BaseModel):
     chat = ForeignKeyField(Chat, backref='balances')
 
 
+class Peer(BaseModel):
+    respond_to = TextField()
+    public_key = BlobField()
+
+
+class Transaction(BaseModel):
+    name = TextField()
+    peer = ForeignKeyField(Peer)
+
+
 # peeweedbevolve.evolve(db, interactive=False)
 
-db.create_tables([User, Chat, LocalBalance])
+db.create_tables([User, Chat, LocalBalance, Peer])
 
 app = Flask(__name__)
 
@@ -53,6 +65,9 @@ with open('/var/vk-bots/currency/token.txt') as o:
 
 with open('/var/vk-bots/currency/coinhive-token.txt') as o:
     coinhive_token = o.read().strip()
+
+with open('/var/vk-bots/currency/secretkey.pem', 'rb') as o:
+    my_secret_key = rsa.PrivateKey.load_pkcs1(o.read())
 
 
 def send(to, msg):
@@ -71,6 +86,7 @@ def repr_user(user_id):
 @app.route('/')
 def index():
     return render_template('index.html')
+
 
 @app.route('/endpoint', methods=['GET', 'POST'])
 def main():
@@ -212,6 +228,24 @@ class UserMention(String):
         session = vk_api.VkApi(token=token)
         api = session.get_api()
         return api.users.get(user_ids=value)[0]['id']
+
+
+class Base64(String):
+
+    def parse(self, value):
+        return base64.b64decode(bytes(value, 'utf-8'))
+
+    def is_val_ok(self, value):
+        try:
+            base64.b64decode(bytes(value, 'utf-8'))
+        except:
+            return False
+
+    def short_name(self):
+        return 'base64'
+
+    def long_name(self):
+        return 'Binary data encoded in Base64'
 
 
 def params(*parameters):
@@ -376,8 +410,9 @@ def convert(user_id, respond_to, amt, chat_id, confirm=None):
         return 'Insufficient funds in global currency to complete the conversion.'
     if confirm != 'Confirm':
         return 'You are requesting to convert ' + GLOBAL_SYMB + str(amt) + ' to ' + LOCAL_SYMB + str(amt) + \
-               ' in chat ' + str(chat_id) + '. If this is what you wanted to do, write "Confirm" without quotes after the ' \
-                                       'amount to convert and repeat your query. '
+               ' in chat ' + str(
+            chat_id) + '. If this is what you wanted to do, write "Confirm" without quotes after the ' \
+                       'amount to convert and repeat your query. '
     chat = Chat.get(Chat.chat_id == chat_id)
     local_balance = LocalBalance.get(LocalBalance.user == user, LocalBalance.chat == chat)
     with db.atomic():
@@ -387,26 +422,50 @@ def convert(user_id, respond_to, amt, chat_id, confirm=None):
         local_balance.save()
     return 'Conversion completed.'
 
+
 @params()
 def withdraw(user_id, respond_to):
     '''Redeem global currency earned through mining.'''
-    answer = requests.get("https://api.coinhive.com/user/balance?secret="+coinhive_token+'&name='+str(user_id)).json()
+    answer = requests.get(
+        "https://api.coinhive.com/user/balance?secret=" + coinhive_token + '&name=' + str(user_id)).json()
     if not answer['success']:
-        return 'Getting your crypto-balance failed. The server response was: '+str(answer)+'\nMost likely this means you haven\'t started mining yet. Visit this community\'s page to go to the mining page.'
-    balance_add = (answer['balance']//MINING_DIFF)
-    if balance_add==0:
-        return 'Not enough hashes to convert to global currency: you have '+str(answer['balance'])+' hashes. Mine more, the exchange rate is '+str(MINING_DIFF)+' hashes per '+GLOBAL_SYMB+'1.'
-    if requests.post("https://api.coinhive.com/user/withdraw", data={'secret':coinhive_token, 'name':str(user_id), 'amount':balance_add*MINING_DIFF}).json()['success']:
+        return 'Getting your crypto-balance failed. The server response was: ' + str(
+            answer) + '\nMost likely this means you haven\'t started mining yet. Visit this community\'s page to go to the mining page.'
+    balance_add = (answer['balance'] // MINING_DIFF)
+    if balance_add == 0:
+        return 'Not enough hashes to convert to global currency: you have ' + str(
+            answer['balance']) + ' hashes. Mine more, the exchange rate is ' + str(
+            MINING_DIFF) + ' hashes per ' + GLOBAL_SYMB + '1.'
+    if requests.post("https://api.coinhive.com/user/withdraw",
+                     data={'secret': coinhive_token, 'name': str(user_id), 'amount': balance_add * MINING_DIFF}).json()[
+        'success']:
         with db.atomic():
-            user = User.get(User.user_id==user_id)
-            user.balance+=balance_add
+            user = User.get(User.user_id == user_id)
+            user.balance += balance_add
             user.save()
-            return 'Your global balance has been increased by '+GLOBAL_SYMB+str(balance_add)+'.'
+            return 'Your global balance has been increased by ' + GLOBAL_SYMB + str(balance_add) + '.'
     else:
         return 'A problem occurred while getting your balance from the Coinhive server.'
 
 
-
+@params(String('peer'), Base64('data'))
+def transaction(user, to, peer, data):
+    '''Perform a bot transaction. Only for use by bots, not to be used by humans.'''
+    if user == to:
+        return 'This command must not be used by humans.'
+    peer = Peer.get_or_none(Peer.respond_to == peer)
+    if peer is None:
+        return 'This peer is unknown. This likely means that the calling bot has been misconfigured, or a' \
+               'malicious user is masquerading as a bot.'
+    peerkey = rsa.PublicKey.load_pkcs1(peer.public_key)
+    try:
+        data = rsa.decrypt(data, my_secret_key)
+    except:
+        return 'Decryption failed. This likely means that the calling bot has been misconfigured, or a' \
+               'malicious user is masquerading as a bot.'
+    # TODO: add logic
+    response = rsa.encrypt(b'not impl', peerkey)
+    return peer.respond_to + ' transactionanswer ' + str(base64.b64encode(response), 'utf-8')
 
 
 def process_msg(text, user, to):
@@ -415,7 +474,7 @@ def process_msg(text, user, to):
         text[0] = text[0].lower()
     except:
         return None
-    cmds = {'balance': balance, 'id': chat_id, 'send': transfer, 'convert': convert, 'withdraw':withdraw}
+    cmds = {'balance': balance, 'id': chat_id, 'send': transfer, 'convert': convert, 'withdraw': withdraw}
     if len(text) == 0: return None
     if text[0] == 'money' or user == to:
         if text[0] == 'money':
