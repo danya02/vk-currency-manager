@@ -7,6 +7,7 @@ from flask import Flask, request, render_template
 from peewee import *
 import requests
 import rsa
+import datetime
 
 import abc
 
@@ -47,11 +48,30 @@ class LocalBalance(BaseModel):
 class Peer(BaseModel):
     respond_to = TextField()
     public_key = BlobField()
+    balance = BigIntegerField(default=0)
 
 
-class Transaction(BaseModel):
-    name = TextField()
-    peer = ForeignKeyField(Peer)
+class LocalBotBalance(BaseModel):
+    peer = ForeignKeyField(Peer, backref='local_balances')
+    balance = BigIntegerField(default=0)
+    chat = ForeignKeyField(Chat, backref='bot_balances')
+
+
+class HumanTransaction(BaseModel):
+    source = ForeignKeyField(User, null=True)
+    dest = ForeignKeyField(User, null=True)
+    amount = BigIntegerField()
+    chat = ForeignKeyField(Chat, null=True)
+    date = DateTimeField(default=datetime.datetime.now)
+
+
+class BotTransaction(BaseModel):
+    human = ForeignKeyField(User)
+    bot = ForeignKeyField(Peer)
+    is_to_bot = BooleanField()
+    amount = BigIntegerField()
+    chat = ForeignKeyField(Chat, null=True)
+    date = DateTimeField(default=datetime.datetime.now)
 
 
 # peeweedbevolve.evolve(db, interactive=False)
@@ -355,6 +375,9 @@ def transfer(user_id, respond_to, dest_user, amt_transfer, confirm=None):
                 other_user.balance += amt_transfer
                 user.save()
                 other_user.save()
+                HumanTransaction.create(chat=None, amount=amt_transfer,
+                                        source=user, dest=other_user)
+
             if other_user_created:
                 msg = 'User ' + repr_user(user_id) + ' has just transferred ' + GLOBAL_SYMB + str(
                     amt_transfer) + ' to you via the Currency manager bot.'
@@ -395,6 +418,9 @@ def transfer(user_id, respond_to, dest_user, amt_transfer, confirm=None):
                 other_local_balance.balance += amt_transfer
                 my_local_balance.save()
                 other_local_balance.save()
+                HumanTransaction.create(chat=chat, amount=amt_transfer,
+                                        source=user, dest=other_user)
+
             return 'Transferred ' + LOCAL_SYMB + str(amt_transfer) + ' to ' + repr_user(dest_user) + '.'
         else:
             return 'Insufficient funds to transfer.'
@@ -420,6 +446,11 @@ def convert(user_id, respond_to, amt, chat_id, confirm=None):
         local_balance.balance += amt
         user.save()
         local_balance.save()
+    HumanTransaction.create(chat=None, amount=amt,
+                            source=user, dest=None)
+    HumanTransaction.create(chat=chat, amount=amt,
+                            source=None, dest=user)
+
     return 'Conversion completed.'
 
 
@@ -443,6 +474,8 @@ def withdraw(user_id, respond_to):
             user = User.get(User.user_id == user_id)
             user.balance += balance_add
             user.save()
+            HumanTransaction.create(chat=None, amount=balance_add,
+                                    source=None, dest=user)
             return 'Your global balance has been increased by ' + GLOBAL_SYMB + str(balance_add) + '.'
     else:
         return 'A problem occurred while getting your balance from the Coinhive server.'
@@ -450,22 +483,22 @@ def withdraw(user_id, respond_to):
 
 @params(String('peer'), Base64('data'))
 def transaction(user, to, peer, data):
-    '''Perform a bot transaction. Only for use by bots, not to be used by humans.'''
+    """Perform a bot transaction. Only for use by bots, not to be used by humans."""
     if user == to:
         return 'This command must not be used by humans.'
     peer = Peer.get_or_none(Peer.respond_to == peer)
     if peer is None:
-        return 'This peer is unknown. This likely means that the calling bot has been misconfigured, or a' \
+        return 'This peer is unknown. This likely means that the calling bot has been misconfigured, or a ' \
                'malicious user is masquerading as a bot.'
     peerkey = rsa.PublicKey.load_pkcs1(peer.public_key)
     try:
         data = rsa.decrypt(data, my_secret_key)
     except:
-        return 'Decryption failed. This likely means that the calling bot has been misconfigured, or a' \
+        return 'Decryption failed. This likely means that the calling bot has been misconfigured, or a ' \
                'malicious user is masquerading as a bot.'
     # TODO: add logic
     response = rsa.encrypt(b'not impl', peerkey)
-    return peer.respond_to + ' transactionanswer ' + str(base64.b64encode(response), 'utf-8')
+    return peer.respond_to + ' transaction_answer ' + str(base64.b64encode(response), 'utf-8')
 
 
 def process_msg(text, user, to):
