@@ -507,7 +507,7 @@ def process_msg(text, user, to):
         text[0] = text[0].lower()
     except:
         return None
-    cmds = {'balance': balance, 'id': chat_id, 'send': transfer, 'convert': convert, 'withdraw': withdraw}
+    cmds = {'balance': balance, 'id': chat_id, 'send': transfer, 'convert': convert, 'withdraw': withdraw, 'transaction':transaction}
     if len(text) == 0: return None
     if text[0] == 'money' or user == to:
         if text[0] == 'money':
