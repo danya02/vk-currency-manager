@@ -258,6 +258,7 @@ class Base64(String):
     def is_val_ok(self, value):
         try:
             base64.b64decode(bytes(value, 'utf-8'))
+            return True
         except:
             return False
 
