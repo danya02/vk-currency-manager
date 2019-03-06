@@ -8,6 +8,7 @@ from peewee import *
 import requests
 import rsa
 import datetime
+import logging
 
 import abc
 
@@ -79,6 +80,7 @@ class BotTransaction(BaseModel):
 db.create_tables([User, Chat, LocalBalance, Peer, HumanTransaction, BotTransaction, LocalBotBalance])
 
 app = Flask(__name__)
+app.logger.setLevel(logging.DEBUG)
 
 with open('/var/vk-bots/currency/token.txt') as o:
     token = o.read().strip()
