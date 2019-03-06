@@ -9,7 +9,7 @@ import requests
 import rsa
 import datetime
 import logging
-
+import threading
 import abc
 
 db = MySQLDatabase('vkfinance', user='vkfinance', password='12349876')
@@ -494,11 +494,25 @@ def transaction(user, to, peer, data):
         return 'This peer is unknown. This likely means that the calling bot has been misconfigured, or a ' \
                'malicious user is masquerading as a bot.'
     peerkey = rsa.PublicKey.load_pkcs1(peer.public_key)
-    try:
-        data = rsa.decrypt(data, my_secret_key)
-    except:
+    lock = threading.Lock()
+    resp={'dec_data':None, 'fail':None}
+    def decrypt(data, resp):
+        try:
+            data = rsa.decrypt(data, my_secret_key)
+            resp['dec_data']=data
+            resp['fail']=False
+        except:
+            resp['fail']=True
+    t = threading.Thread(target=decrypt, daemon=True, args=data, resp)
+    t.start()
+    t.join(3)
+    if t.is_alive():
+        return 'Decryption timed out. That\'s an error.'
+    elif resp['fail']:
         return 'Decryption failed. This likely means that the calling bot has been misconfigured, or a ' \
                'malicious user is masquerading as a bot.'
+    data = resp['data']
+
     # TODO: add logic
     response = rsa.encrypt(b'not impl', peerkey)
     return peer.respond_to + ' transaction_answer ' + str(base64.b64encode(response), 'utf-8')
