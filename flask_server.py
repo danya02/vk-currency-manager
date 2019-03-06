@@ -76,7 +76,7 @@ class BotTransaction(BaseModel):
 
 # peeweedbevolve.evolve(db, interactive=False)
 
-db.create_tables([User, Chat, LocalBalance, Peer])
+db.create_tables([User, Chat, LocalBalance, Peer, HumanTransaction, BotTransaction, LocalBotBalance])
 
 app = Flask(__name__)
 
