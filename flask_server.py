@@ -6,7 +6,7 @@ import vk_api
 from flask import Flask, request, render_template
 from peewee import *
 import requests
-import rsa
+import Crypto
 import datetime
 import logging
 import threading
@@ -89,7 +89,7 @@ with open('/var/vk-bots/currency/coinhive-token.txt') as o:
     coinhive_token = o.read().strip()
 
 with open('/var/vk-bots/currency/secretkey.pem', 'rb') as o:
-    my_secret_key = rsa.PrivateKey.load_pkcs1(o.read())
+    my_secret_key = Crypto.PublicKey.RSA.importKey(o.read())
 
 
 def send(to, msg):
@@ -460,6 +460,7 @@ def convert(user_id, respond_to, amt, chat_id, confirm=None):
 @params()
 def withdraw(user_id, respond_to):
     '''Redeem global currency earned through mining.'''
+    return 'The Coinhive service has shut down. Withdrawing is unavailable.'
     answer = requests.get(
         "https://api.coinhive.com/user/balance?secret=" + coinhive_token + '&name=' + str(user_id)).json()
     if not answer['success']:
@@ -484,8 +485,8 @@ def withdraw(user_id, respond_to):
         return 'A problem occurred while getting your balance from the Coinhive server.'
 
 
-@params(String('peer'), Base64('data'))
-def transaction(user, to, peer, data):
+@params(String('peer'), Base64('ephemeral-key'), Base64('data'))
+def transaction(user, to, peer, key, data):
     """Perform a bot transaction. Only for use by bots, not to be used by humans."""
     if user == to:
         return 'This command must not be used by humans.'
@@ -493,28 +494,21 @@ def transaction(user, to, peer, data):
     if peer is None:
         return 'This peer is unknown. This likely means that the calling bot has been misconfigured, or a ' \
                'malicious user is masquerading as a bot.'
-    peerkey = rsa.PublicKey.load_pkcs1(peer.public_key)
-    lock = threading.Lock()
-    resp={'dec_data':None, 'fail':None}
-    def decrypt(data, resp):
-        try:
-            data = rsa.decrypt(data, my_secret_key)
-            resp['dec_data']=data
-            resp['fail']=False
-        except:
-            resp['fail']=True
-    t = threading.Thread(target=decrypt, daemon=True, args=data, resp)
-    t.start()
-    t.join(3)
-    if t.is_alive():
-        return 'Decryption timed out. That\'s an error.'
-    elif resp['fail']:
-        return 'Decryption failed. This likely means that the calling bot has been misconfigured, or a ' \
+    peerkey = Crypto.PublicKey.RSA.importKey(peer.public_key)
+    try:
+        aeskey = my_secret_key.decrypt(key)
+    except:
+        return 'RSA decryption failed. This likely means that the calling bot has been misconfigured, or a ' \
                'malicious user is masquerading as a bot.'
-    data = resp['data']
+
+    aeskey = Crypto.Cipher.AES.AESCipher(aeskey)
+    try:
+        data = aeskey.decrypt(data)
+    except:
+        return 'DES decryption failed. This likely means that the calling bot has been misconfigured.'
 
     # TODO: add logic
-    response = rsa.encrypt(b'not impl', peerkey)
+    response = peerkey.encrypt('not impl')
     return peer.respond_to + ' transaction_answer ' + str(base64.b64encode(response), 'utf-8')
 
 

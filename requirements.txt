@@ -6,3 +6,4 @@ peewee-db-evolve
 mysqlclient
 requests
 rsa
+pycrypto
